@@ -1,0 +1,39 @@
+apply plugin: 'checkstyle'
+
+buildscript {
+    repositories {
+        google()
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:3.2.1'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        jcenter()
+    }
+}
+
+checkstyle {
+    toolVersion '8.13'
+}
+
+ext {
+    ci = project.hasProperty("ci")
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}
+
+task checkstyle (type: Checkstyle) {
+    configFile rootProject.file("checkstyle.xml")
+    source "app/src/main/java"
+    ignoreFailures false
+    showViolations true
+    include "**/*.java"
+    classpath = files()
+}

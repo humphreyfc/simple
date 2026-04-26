@@ -1,0 +1,113 @@
+image: openjdk:8-jdk
+
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+  GITLAB_URL: "framagit.org"
+  ANDROID_SDK_TOOLS: "4333796"
+  ANDROID_HOME: "$CI_PROJECT_DIR/.android-sdk"
+
+cache:
+  key: ${CI_PIPELINE_ID}
+  paths:
+    - "$ANDROID_HOME/"
+    - .gradle/
+
+before_script:
+  # Get sdk version from project
+  - export ANDROID_COMPILE_SDK=`egrep '^[[:blank:]]+compileSdkVersion'  app/build.gradle | awk '{print $2}'`
+  # Explict output for logging purpose only
+  - echo $ANDROID_HOME
+  - echo $ANDROID_SDK_TOOLS
+  - echo $ANDROID_COMPILE_SDK
+  # Fetch the specified SDK tools version to build with
+  # Currently framagit.org have all runner with the same tag and don't use a distributed cache, so validate if restored the cache per pipeline ID
+  - if [ ! -d "$ANDROID_HOME" ]; then
+  -   wget --quiet --output-document=/tmp/android-sdk.zip https://dl.google.com/android/repository/sdk-tools-linux-${ANDROID_SDK_TOOLS}.zip
+  -   unzip -q -o -d $ANDROID_HOME /tmp/android-sdk.zip
+  #   Install platform tools and Android SDK for the compile target
+  -   echo y | $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-${ANDROID_COMPILE_SDK}" >/dev/null
+  - fi
+  # Adds to environment path
+  - echo $CI_PROJECT_DIR
+  - export PATH=$PATH:$ANDROID_HOME/platform-tools/
+  - chmod +x ./gradlew
+
+lintAll:
+  stage: test
+  except:
+    - master
+  script:
+    - ./gradlew --console=plain lint
+    - ./gradlew --console=plain checkstyle
+
+lintRelease:
+  stage: test
+  only:
+    - master
+  script:
+    - ./gradlew --console=plain lintRelease
+    - ./gradlew --console=plain checkstyle
+
+testAll:
+  stage: test
+  except:
+    - master
+  script:
+    - ./gradlew --console=plain test
+
+testRelease:
+  stage: test
+  only:
+    - master
+  script:
+    - ./gradlew --console=plain testReleaseUnitTest
+
+buildDebug:
+  stage: build
+  except:
+    - master
+  script:
+    - ./gradlew assembleDebug
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - app/build/outputs/
+
+buildRelease:
+  stage: build
+  only:
+    - master
+  script:
+    - ./gradlew assembleRelease
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - app/build/outputs/
+
+release:
+  stage: deploy
+  only:
+    - master
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq pandoc wget
+    - wget --quiet --output-document=/tmp/nvm-install.sh https://raw.githubusercontent.com/creationix/nvm/v0.33.6/install.sh
+    - bash /tmp/nvm-install.sh
+    - export NVM_DIR="$HOME/.nvm" &&. "$NVM_DIR/nvm.sh" && nvm install 8
+    - eval $(ssh-agent -s)
+    - ssh-add <(echo "$GIT_SSH_KEY")
+    - mkdir -p ~/.ssh && ssh-keyscan $GITLAB_URL >> ~/.ssh/known_hosts
+    - git config --global user.email $GIT_AUTHOR_EMAIL
+    - git config --global user.name $GIT_AUTHOR_NAME
+  cache: {}
+  script:
+    - npm install -g semantic-release @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog @semantic-release/exec @semantic-release/git @semantic-release/gitlab
+    - semantic-release
+    - git fetch
+    - git checkout develop
+    - git rebase origin/master
+    - git push git@${GITLAB_URL}:${CI_PROJECT_PATH}.git develop

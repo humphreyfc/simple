@@ -1,0 +1,18 @@
+plugins:
+  - "@semantic-release/commit-analyzer"
+  - "@semantic-release/release-notes-generator"
+  - - "@semantic-release/changelog"
+    - changelogTitle: |-
+        # Change Log
+
+        All notable changes to this project will be documented in this file.
+        See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
+  - - "@semantic-release/exec"
+    - prepareCmd: './scripts/prepare.sh ${nextRelease.version} "${nextRelease.notes}"'
+  - - "@semantic-release/git"
+    - assets:
+        - CHANGELOG.md
+        - metadata/**/*.txt
+        - app/build.gradle
+      message: "chore(release): v${nextRelease.version}\n\n${nextRelease.notes}"
+  - "@semantic-release/gitlab"

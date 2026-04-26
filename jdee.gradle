@@ -1,0 +1,150 @@
+//
+// Gradle task that creates the JDEE project file to andorid
+//
+
+import static groovy.io.FileType.FILES
+
+def jarFiles = { project ->
+    def folder = new File("${project.buildDir}/intermediates")
+    def files = []
+
+    if( folder.exists() ) {
+        // if exist look for jars
+        folder.eachFileRecurse(FILES) {
+            if(it.name.endsWith('.jar')) {
+                files << it.getAbsolutePath()
+            }
+        }
+    }
+    files
+}
+
+def getImplementation = { project ->
+    def files = []
+    def transforms = []
+
+    // get dependencies jars
+    project.configurations.implementationDeps.each { dep ->
+        if(dep.name.endsWith('.jar')) {
+            files << dep.getAbsolutePath()
+        } else {
+            // get jar from aar
+            def cacheFolder = new File("${System.getProperty('user.home')}/.gradle/caches")
+            
+            if( cacheFolder.exists() ) {
+                cacheFolder.eachFileRecurse(FILES) {
+                    if(!transforms.contains(dep.name) && it.path.contains(dep.name) &&
+                       it.name.endsWith('.jar')) {
+                        transforms << dep.name
+                        files << it.getAbsolutePath()
+                    }
+                }
+            }
+        }
+    }
+    
+    files
+}
+
+def generatedDirs = { project ->
+    def folder = new File("${project.buildDir}/generated")
+    def dirs = []
+
+    if( folder.exists() ) {
+        folder.eachDirRecurse { dir ->
+            if (!(dir ==~ /.*generated\/res\/.*/)) {
+                dirs << dir
+            }
+        }
+    }
+    dirs
+}
+
+def prj = { project ->
+    "(jdee-project-file-version" (["1.0"])
+    "(jdee-set-variables" {
+        "'(jdee-compile-option-directory" (["${project.buildDir}"])
+        "'(jdee-junit-working-directory" ([])
+
+        "'(jdee-compile-option-source" {
+            "'(" (["default", "${project.targetCompatibility}"])
+        }
+
+        "'(jdee-compile-option-target" {
+            "'(" (["default", "${project.sourceCompatibility}"])
+        }
+
+        "'(jdee-sourcepath" {
+            "'(" (
+                ["${project.projectDir}/src/androidTest/java"]
+                + project.android.sourceSets.main.java.srcDirs
+                + android.sourceSets.test.java.srcDirs
+                + project.android.sourceSets.test.java.srcDirs
+                + project.android.sourceSets.main.assets.srcDirs
+                + project.android.sourceSets.main.renderscript.srcDirs
+                + project.android.sourceSets.main.res.srcDirs
+                + project.android.sourceSets.main.aidl.srcDirs
+                + project.android.sourceSets.main.jniLibs.srcDirs
+                + project.android.sourceSets.main.resources.srcDirs
+                + (([] as Set) + generatedDirs(project))
+            )
+        }
+
+        "'(jdee-global-classpath" {
+            "'(" (
+                ["${project.buildDir}/intermediates/classes/debug",
+                 "${project.buildDir}/intermediates/classes/test/debug"]
+                + android.getBootClasspath()
+                + configurations.archives.allArtifacts.getFiles()
+                + project.compileDebugJavaWithJavac.destinationDir
+                + project.compileReleaseJavaWithJavac.destinationDir
+                + (([] as Set) + project.configurations.compile.getFiles()
+                   + project.configurations.testCompile.getFiles()
+                   + getImplementation(project)
+                   + jarFiles(project)
+                  ))
+        }
+    }
+}
+
+projects {
+    task("jdee") {
+        doLast {
+            def output = new File(project.projectDir, "prj.el").newPrintWriter()
+            output.print ';;\n'
+            output.print ';; This is a generated file.\n'
+            output.print ';; To recreate, run "`gradlew jdee` or `gradlew assemble jdee`".\n'
+            output.print ';;\n'
+            try {
+                prj.delegate = new NodeBuilder() {
+                    def lev = 0
+
+                    def write = { Object file ->
+                        output.print '\n' + ''.padRight(lev, ' ') +  "\"${file}\"".tr('\\', '/')
+                    }
+
+                    Object createNode(Object name) {
+                        output.print '\n'  + ''.padRight(lev++, ' ') + name
+                        return name
+                    }
+
+                    Object createNode(Object name, Object value) {
+                        createNode(name)
+                        value.each write
+                        return name
+                    }
+
+                    void nodeCompleted(Object parent, Object child) {
+                        output.print ")"
+                        lev--
+                    }
+                }
+
+                prj(project)
+                output.close()
+            } finally {
+                output.flush()
+            }
+        }
+    }
+}
